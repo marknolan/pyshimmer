@@ -24,7 +24,9 @@ from pyshimmer.util import flatten_list, bit_is_set
 
 class ChannelDataType:
 
-    def __init__(self, size: int, signed: bool = True, le: bool = True):
+    def __init__(
+        self, size: int, signed: bool = True, le: bool = True, bits: int | None = None
+    ):
         """Represents the binary data type and format of a Shimmer data channel
 
         Every channel that is recorded by a Shimmer device has a specific data type. This
@@ -35,10 +37,22 @@ class ChannelDataType:
         :param signed: True if the data type is a signed integer
         :param le: True if the data type is encoded little endian, False if the
             data type is encoded big endian
+        :param bits: Number of significant bits, for a value that does not fill the
+            whole field. The value is left-justified: it occupies the most significant
+            bits of the field, and the remaining low bits are discarded when decoding
+            and zero when encoding. Defaults to the full width of the field.
         """
+        if bits is None:
+            bits = size * 8
+        elif not 0 < bits <= size * 8:
+            raise ValueError(
+                f"Number of bits must be between 1 and {size * 8}, not {bits}"
+            )
+
         self._size = size
         self._signed = signed
         self._le = le
+        self._bits = bits
 
     @property
     def little_endian(self) -> bool:
@@ -63,6 +77,10 @@ class ChannelDataType:
     def size(self) -> int:
         return self._size
 
+    @property
+    def bits(self) -> int:
+        return self._bits
+
     def decode(self, val_bin: bytes) -> int:
         if len(val_bin) != self.size:
             raise ValueError(
@@ -70,9 +88,12 @@ class ChannelDataType:
                 f"{len(val_bin)} != {self.size}"
             )
 
-        return int.from_bytes(val_bin, byteorder=self.byte_order, signed=self.signed)
+        val = int.from_bytes(val_bin, byteorder=self.byte_order, signed=self.signed)
+        # An arithmetic shift, so a signed value keeps its sign
+        return val >> (self.size * 8 - self.bits)
 
     def encode(self, val: int) -> bytes:
+        val <<= self.size * 8 - self.bits
         return val.to_bytes(
             length=self.size, byteorder=self.byte_order, signed=self.signed
         )
@@ -144,23 +165,23 @@ class EChannelType(Enum):
     INTERNAL_ADC_A2 = (0x13, True)
 
     # High G Accelerometer X
-    # Chips: MPU9150
+    # Chips: MPU9150 (Shimmer3), ADXL371 (Shimmer3R)
     ACCEL_HG_X = (0x14, True)
     # High G Accelerometer Y
-    # Chips: MPU9150
+    # Chips: MPU9150 (Shimmer3), ADXL371 (Shimmer3R)
     ACCEL_HG_Y = (0x15, True)
     # High G Accelerometer Z
-    # Chips: MPU9150
+    # Chips: MPU9150 (Shimmer3), ADXL371 (Shimmer3R)
     ACCEL_HG_Z = (0x16, True)
 
     # Wide-Range Magnetometer X
-    # Chips: MPU9150
+    # Chips: MPU9150 (Shimmer3), LIS3MDL (Shimmer3R)
     MAG_WR_X = (0x17, True)
     # Wide-Range Magnetometer Y
-    # Chips: MPU9150
+    # Chips: MPU9150 (Shimmer3), LIS3MDL (Shimmer3R)
     MAG_WR_Y = (0x18, True)
     # Wide-Range Magnetometer Z
-    # Chips: MPU9150
+    # Chips: MPU9150 (Shimmer3), LIS3MDL (Shimmer3R)
     MAG_WR_Z = (0x19, True)
 
     # Temperature

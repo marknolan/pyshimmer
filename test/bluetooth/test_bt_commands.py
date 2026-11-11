@@ -323,6 +323,62 @@ class TestBluetoothCommands:
         cmd = DummyCommand(rev)
         self.assert_cmd(cmd, b"\x96")
 
+    def test_data_packet_shimmer3r_accel_hg_and_mag_wr(self):
+        # The first 46 bytes of three packets a Shimmer3R streamed at 1024 Hz with
+        # every sensor on. The packets carry three more channels after these.
+        rev = RevisionRegistry.REV_SHIMMER3R
+        channel_ids = [
+            # Magnetometer, gyroscope, low-noise accelerometer
+            *(0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x00, 0x01, 0x02),
+            # Pressure and temperature
+            *(0x1B, 0x1A),
+            # High-g accelerometer, wide-range accelerometer, wide-range magnetometer
+            *(0x14, 0x15, 0x16, 0x04, 0x05, 0x06, 0x17, 0x18, 0x19),
+        ]
+        channels = [EChannelType.TIMESTAMP] + [
+            EChannelType.enum_for_id(i) for i in channel_ids
+        ]
+        packets = [
+            "005c20a8270051001efdb7ff2700150088f3e83c99ef00925e00678001"
+            "50ffb00030ecc408f14cf3000000000000",
+            "007c20a8270051001efdafff2d00080078f3d13c83ef00925e00678001"
+            "700020ffb0a8c4ecf000f3000000000000",
+            "009c20a8270051001efda9ff1f000700a0f3073d91ef008f5e00698001"
+            "10ffe0ffe0b8c40cf164f3000000000000",
+        ]
+        timestamps = [11018332, 11018364, 11018396]
+        accel_hg = [(21, -5, 3), (23, 2, -5), (17, -2, -2)]
+        accel_wr = [
+            (-15124, -3832, -3252),
+            (-15192, -3860, -3328),
+            (-15176, -3828, -3228),
+        ]
+
+        for packet, ts, hg, wr in zip(packets, timestamps, accel_hg, accel_wr):
+            serial, mock = self.create_mock()
+            pkt = DataPacket(rev, list(zip(channels, rev.get_channel_dtypes(channels))))
+            mock.test_put_read_data(bytes.fromhex(packet))
+            pkt.receive(serial)
+
+            assert mock.test_get_remaining_read_data() == b""
+            assert pkt[EChannelType.TIMESTAMP] == ts
+            assert (
+                pkt[EChannelType.ACCEL_HG_X],
+                pkt[EChannelType.ACCEL_HG_Y],
+                pkt[EChannelType.ACCEL_HG_Z],
+            ) == hg
+            assert (
+                pkt[EChannelType.ACCEL_WR_X],
+                pkt[EChannelType.ACCEL_WR_Y],
+                pkt[EChannelType.ACCEL_WR_Z],
+            ) == wr
+            # The wide-range magnetometer read zero throughout this recording
+            assert (
+                pkt[EChannelType.MAG_WR_X],
+                pkt[EChannelType.MAG_WR_Y],
+                pkt[EChannelType.MAG_WR_Z],
+            ) == (0, 0, 0)
+
     @pytest.mark.parametrize("rev", RevisionRegistry.ALL_REVISIONS)
     def test_data_packet(self, rev: HardwareRevision):
         serial, mock = self.create_mock()

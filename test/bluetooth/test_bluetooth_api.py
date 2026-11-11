@@ -694,6 +694,58 @@ class TestShimmerBluetoothIntegration:
         assert pkt[EChannelType.TIMESTAMP] == 15995685
         assert pkt[EChannelType.INTERNAL_ADC_A1] == 1866
 
+    def test_streaming_shimmer3r_accel_hg_and_mag_wr(
+        self, helper: IntegrationTestHelper
+    ):
+        helper.setup(run_sot_initialize=True, hw_version=HardwareVersion.SHIMMER3R)
+
+        pkts = []
+
+        # Magnetometer, gyroscope, low-noise accelerometer, pressure and temperature,
+        # high-g accelerometer, wide-range accelerometer, wide-range magnetometer
+        channel_ids = bytes.fromhex("0708090a0b0c0001021b1a141516040506171819")
+        response = (
+            b"\xff\x02\x20\x00\x02\x00\x01\x09\x00\x00\x00"
+            + bytes([len(channel_ids), 1])
+            + channel_ids
+        )
+
+        inquiry_ftr = helper.submit_req_resp_handler(1, response)
+        start_streaming_ftr = helper.submit_req_resp_handler(1, b"\xff")
+        # The first 46 bytes of two packets a Shimmer3R streamed at 1024 Hz with
+        # every sensor on
+        helper.submit_req_resp_handler(
+            0,
+            bytes.fromhex(
+                "005c20a8270051001efdb7ff2700150088f3e83c99ef00925e00678001"
+                "50ffb00030ecc408f14cf3000000000000"
+                "007c20a8270051001efdafff2d00080078f3d13c83ef00925e00678001"
+                "700020ffb0a8c4ecf000f3000000000000"
+            ),
+        )
+        stop_streaming_ftr = helper.submit_req_resp_handler(1, b"\xff")
+
+        helper.sot.add_stream_callback(pkts.append)
+        helper.sot.start_streaming()
+
+        assert inquiry_ftr.result() == b"\x01"
+        assert start_streaming_ftr.result() == b"\x07"
+
+        helper.sot.stop_streaming()
+        assert stop_streaming_ftr.result() == b"\x20"
+
+        assert len(pkts) == 2
+        assert pkts[0][EChannelType.ACCEL_HG_X] == 21
+        assert pkts[0][EChannelType.ACCEL_HG_Y] == -5
+        assert pkts[0][EChannelType.ACCEL_HG_Z] == 3
+        assert pkts[0][EChannelType.ACCEL_WR_X] == -15124
+        assert pkts[0][EChannelType.MAG_WR_X] == 0
+        assert pkts[1][EChannelType.ACCEL_HG_X] == 23
+        assert pkts[1][EChannelType.ACCEL_HG_Y] == 2
+        assert pkts[1][EChannelType.ACCEL_HG_Z] == -5
+        assert pkts[1][EChannelType.ACCEL_WR_X] == -15192
+        assert pkts[1][EChannelType.MAG_WR_Z] == 0
+
     def test_status_update(
         self, helper: IntegrationTestHelper, hw_version: HardwareVersion
     ):

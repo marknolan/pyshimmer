@@ -132,3 +132,42 @@ class ChannelDataTypeTest(TestCase):
 
         test_both_endianess(0x12345, 3, b"\x45\x23\x01", signed=False)
         test_both_endianess(-0x12345, 3, b"\xbb\xdc\xfe", signed=True)
+
+    def test_channel_data_type_bits(self):
+        # By default, the value fills the field
+        self.assertEqual(ChannelDataType(3, signed=False).bits, 24)
+        self.assertEqual(ChannelDataType(2, signed=True, bits=12).bits, 12)
+
+        with pytest.raises(ValueError):
+            ChannelDataType(2, bits=0)
+
+        with pytest.raises(ValueError):
+            ChannelDataType(2, bits=17)
+
+    def test_channel_data_type_left_justified(self):
+        # A signed 12-bit value in the top bits of a big-endian word
+        dt = ChannelDataType(2, signed=True, le=False, bits=12)
+        self.assertEqual(dt.size, 2)
+
+        self.assertEqual(21, dt.decode(b"\x01\x50"))
+        self.assertEqual(-5, dt.decode(b"\xff\xb0"))
+        self.assertEqual(-1, dt.decode(b"\xff\xf0"))
+        self.assertEqual(2**11 - 1, dt.decode(b"\x7f\xf0"))
+        self.assertEqual(-(2**11), dt.decode(b"\x80\x00"))
+
+        # The low bits carry no data
+        self.assertEqual(21, dt.decode(b"\x01\x5f"))
+        self.assertEqual(-5, dt.decode(b"\xff\xbf"))
+
+        self.assertEqual(b"\x01\x50", dt.encode(21))
+        self.assertEqual(b"\xff\xb0", dt.encode(-5))
+        self.assertEqual(b"\x80\x00", dt.encode(-(2**11)))
+
+        with pytest.raises(OverflowError):
+            dt.encode(2**11)
+
+        # An unsigned 12-bit value in the top bits of a little-endian word
+        dt = ChannelDataType(2, signed=False, le=True, bits=12)
+        self.assertEqual(2**12 - 1, dt.decode(b"\xf0\xff"))
+        self.assertEqual(0x015, dt.decode(b"\x50\x01"))
+        self.assertEqual(b"\xf0\xff", dt.encode(2**12 - 1))
