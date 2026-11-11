@@ -137,6 +137,27 @@ def calibrate_u12_adc_value(uncalibratedData, offset, vRefP, gain):
     return (uncalibratedData - offset) * ((vRefP / gain) / 4095)
 
 
+SOUND_LEVEL_NO_LEVEL = -32768
+
+
+def sound_level_to_db(raw: int) -> float:
+    """Convert a raw sound level to dB(A)
+
+    The Shimmer3R's SOUND_LEVEL channel is the A-weighted level at the
+    microphone, as an int16 in 0.01 dB(A) steps. Each value covers 128 ms of
+    audio and repeats until the next one. The level is nominal: the firmware
+    works it out from the microphone's datasheet, not from a calibrated meter.
+
+    :param raw: The channel's value, as received
+    :return: The level in dB(A), or NaN for -32768, which the firmware sends
+        before its first level and while the microphone capture is not running
+    """
+    if raw == SOUND_LEVEL_NO_LEVEL:
+        return float("nan")
+
+    return raw / 100.0
+
+
 def battery_voltage_to_percent(battery_voltage):
     """Convert battery voltage to percent
 

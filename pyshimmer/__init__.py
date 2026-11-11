@@ -30,4 +30,4 @@ from .dev.revisions import (
 from .reader.binary_reader import ShimmerBinaryReader
 from .reader.shimmer_reader import ShimmerReader
 from .uart.dock_api import ShimmerDock
-from .util import fmt_hex
+from .util import fmt_hex, sound_level_to_db

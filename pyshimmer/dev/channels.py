@@ -209,6 +209,11 @@ class EChannelType(Enum):
     # Bridge Amp Low
     STRAIN_LOW = (0x28, True)
 
+    # Sound level: the A-weighted level at the microphone, as an int16 in
+    # 0.01 dB(A) steps. -32768 means no level. See sound_level_to_db().
+    # Hardware: Shimmer3R only
+    SOUND_LEVEL = (0x38, True)
+
     TIMESTAMP = (0x100, False)
 
     def __new__(cls, channel_id: int, is_public: bool):

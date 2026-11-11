@@ -212,6 +212,18 @@ class TestBluetoothCommands:
         assert buf_size == 1
         assert ctypes == [EChannelType.INTERNAL_ADC_A1]
 
+    def test_inquiry_command_shimmer3r_sound_level(self):
+        cmd = Shimmer3RInquiryCommand(RevisionRegistry.REV_SHIMMER3R)
+        sr, buf_size, ctypes = self.assert_cmd(
+            cmd,
+            b"\x01",
+            b"\x02",
+            b"\x02\x40\x00\x02\x00\x01\x09\x00\x00\x00\x02\x01\x38\x03",
+        )
+
+        assert sr == 512.0
+        assert ctypes == [EChannelType.SOUND_LEVEL, EChannelType.VBATT]
+
     @pytest.mark.parametrize("rev", RevisionRegistry.ALL_REVISIONS)
     def test_start_streaming_command(self, rev: HardwareRevision):
         cmd = StartStreamingCommand(rev)
@@ -340,3 +352,30 @@ class TestBluetoothCommands:
 
         assert pkt[EChannelType.TIMESTAMP] == 0xB2D0DE
         assert pkt[EChannelType.INTERNAL_ADC_A1] == 0x0726
+
+    def test_data_packet_sound_level(self):
+        # Three packets a Shimmer3R streamed at 512 Hz with the magnetometer,
+        # gyroscope, low-noise accelerometer, sound level and battery on. The
+        # firmware's test rig decoded no level (-32768), then 9044 twice, from
+        # the same bytes.
+        rev = RevisionRegistry.REV_SHIMMER3R
+        channel_ids = [0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x00, 0x01, 0x02, 0x38, 0x03]
+        channels = [EChannelType.TIMESTAMP] + [
+            EChannelType.enum_for_id(i) for i in channel_ids
+        ]
+        packets = [
+            "00e3852226004d0019fdbbff310012007ef3e83c8def00801f0b",
+            "0023862226004d0019fdb0ff1f00190073f3f43c8eef54232d0b",
+            "0063862226004d0019fdabff2f00100072f3ef3cb9ef5423190b",
+        ]
+        levels = [-32768, 9044, 9044]
+        battery = [2847, 2861, 2841]
+
+        for packet, level, vbatt in zip(packets, levels, battery):
+            serial, mock = self.create_mock()
+            pkt = DataPacket(rev, list(zip(channels, rev.get_channel_dtypes(channels))))
+            mock.test_put_read_data(bytes.fromhex(packet))
+            pkt.receive(serial)
+
+            assert pkt[EChannelType.SOUND_LEVEL] == level
+            assert pkt[EChannelType.VBATT] == vbatt

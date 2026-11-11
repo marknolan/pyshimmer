@@ -45,6 +45,7 @@ class EChannelTypeTest(TestCase):
 
     def test_channel_type_enum_for_id(self):
         assert EChannelType.enum_for_id(0x03) is EChannelType.VBATT
+        assert EChannelType.enum_for_id(0x38) is EChannelType.SOUND_LEVEL
 
         with pytest.raises(ValueError):
             # Unknown ID

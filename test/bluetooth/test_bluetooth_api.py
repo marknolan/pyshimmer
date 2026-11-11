@@ -659,6 +659,37 @@ class TestShimmerBluetoothIntegration:
         assert ftr.result() == b"\x01"
         assert r == [EChannelType.TIMESTAMP, EChannelType.INTERNAL_ADC_A1]
 
+    def test_streaming_sound_level(self, helper: IntegrationTestHelper):
+        helper.setup(run_sot_initialize=True, hw_version=HardwareVersion.SHIMMER3R)
+
+        pkts = []
+
+        # Channels: sound level (0x38), battery (0x03)
+        response = b"\xff\x02\x40\x00\x02\x00\x01\x09\x00\x00\x00\x02\x01\x38\x03"
+
+        inquiry_ftr = helper.submit_req_resp_handler(1, response)
+        start_streaming_ftr = helper.submit_req_resp_handler(1, b"\xff")
+        # No level yet (0x8000), then 49.41 dB(A) (0x134D)
+        helper.submit_req_resp_handler(
+            0, b"\x00\x25\x13\xf4\x00\x80\x1f\x0b" + b"\x00\x65\x13\xf4\x4d\x13\x2d\x0b"
+        )
+        stop_streaming_ftr = helper.submit_req_resp_handler(1, b"\xff")
+
+        helper.sot.add_stream_callback(pkts.append)
+        helper.sot.start_streaming()
+
+        assert inquiry_ftr.result() == b"\x01"
+        assert start_streaming_ftr.result() == b"\x07"
+
+        helper.sot.stop_streaming()
+        assert stop_streaming_ftr.result() == b"\x20"
+
+        assert len(pkts) == 2
+        assert pkts[0][EChannelType.SOUND_LEVEL] == -32768
+        assert pkts[0][EChannelType.VBATT] == 2847
+        assert pkts[1][EChannelType.SOUND_LEVEL] == 4941
+        assert pkts[1][EChannelType.VBATT] == 2861
+
     def test_streaming(
         self, helper: IntegrationTestHelper, hw_version: HardwareVersion
     ):

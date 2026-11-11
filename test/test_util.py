@@ -31,6 +31,7 @@ from pyshimmer.util import (
     unwrap,
     calibrate_u12_adc_value,
     battery_voltage_to_percent,
+    sound_level_to_db,
     FileIOBase,
 )
 
@@ -156,6 +157,13 @@ class UtilTest(TestCase):
 
         actual = battery_voltage_to_percent(voltage)
         np.testing.assert_equal(actual, desired)
+
+    def test_sound_level_to_db(self):
+        assert sound_level_to_db(4941) == 49.41
+        assert sound_level_to_db(0) == 0.0
+        assert sound_level_to_db(-1) == -0.01
+        assert sound_level_to_db(32767) == 327.67
+        assert np.isnan(sound_level_to_db(-32768))
 
     def test_peek_queue(self):
         queue = PeekQueue()

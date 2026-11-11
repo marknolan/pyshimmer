@@ -69,6 +69,7 @@ class Shimmer3Revision(BaseRevision):
         EChannelType.EXG2_CH2_16BIT: ChannelDataType(2, signed=True, le=False),
         EChannelType.STRAIN_HIGH: ChannelDataType(2, signed=False, le=True),
         EChannelType.STRAIN_LOW: ChannelDataType(2, signed=False, le=True),
+        EChannelType.SOUND_LEVEL: None,
         EChannelType.TIMESTAMP: ChannelDataType(3, signed=False, le=True),
     }
 
