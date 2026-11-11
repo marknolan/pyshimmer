@@ -15,13 +15,23 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 from __future__ import annotations
 
+import io
 import itertools
+import struct
 
 import numpy as np
 import pytest
 
 from pyshimmer import Shimmer3Revision, EChannelType
+from pyshimmer.bluetooth.bt_commands import DataPacket
+from pyshimmer.bluetooth.bt_serial import BluetoothSerial
 from pyshimmer.dev.channels import ESensorGroup
+
+
+class _ByteStream(io.BytesIO):
+    # A blocking serial without a timeout, as pyshimmer expects; a short read past the
+    # end of the bytes aborts the read
+    timeout = None
 
 
 class TestShimmer3Revision:
@@ -224,3 +234,107 @@ class TestShimmer3Revision:
 
         with pytest.raises(ValueError):
             revision.get_exg_chip_and_channel(EChannelType.ACCEL_HG_X)
+
+    @pytest.mark.parametrize("sensor", [ESensorGroup.ACCEL_HG, ESensorGroup.MAG_WR])
+    def test_alt_accel_and_mag_channels_have_dtypes(
+        self, revision: Shimmer3Revision, sensor: ESensorGroup
+    ):
+        # The firmware sends two bytes for each of these channels when the sensor is on,
+        # so a channel without a data type breaks every stream it is in
+        channels = revision.get_enabled_channels([sensor])
+        assert len(channels) == 3
+        for dtype in revision.get_channel_dtypes(channels):
+            assert dtype is not None
+            assert dtype.size == 2
+            assert dtype.signed
+
+    def test_alt_accel_dtype(self, revision: Shimmer3Revision):
+        # The MPU-9150/9250 or ICM-20948 accelerometer, read from ACCEL_XOUT_H
+        channels = [
+            EChannelType.ACCEL_HG_X,
+            EChannelType.ACCEL_HG_Y,
+            EChannelType.ACCEL_HG_Z,
+        ]
+        for dtype in revision.get_channel_dtypes(channels):
+            assert dtype.big_endian
+
+    def test_alt_mag_dtype(self, revision: Shimmer3Revision):
+        # The AK8975/AK8963 or AK09916 magnetometer, read from HXL
+        channels = [
+            EChannelType.MAG_WR_X,
+            EChannelType.MAG_WR_Y,
+            EChannelType.MAG_WR_Z,
+        ]
+        for dtype in revision.get_channel_dtypes(channels):
+            assert dtype.little_endian
+
+    def test_alt_accel_and_mag_sensor_bits(self, revision: Shimmer3Revision):
+        assert revision.sensors2bitfield([ESensorGroup.ACCEL_HG]) == 0x400000
+        assert revision.sensors2bitfield([ESensorGroup.MAG_WR]) == 0x200000
+
+    def test_data_packet_with_alt_accel_and_mag(self, revision: Shimmer3Revision):
+        # A packet laid out as the Shimmer3 firmware packs it on an ICM-20948 board:
+        # low-noise accel, battery, gyro, wide-range accel, mag, then the alternative
+        # accel and mag. On that board the wide-range accel is the same chip reading as
+        # the alternative accel, swapped to little-endian with Y negated, and the mag the
+        # same reading as the alternative mag with Z negated, so each pair checks the
+        # other's byte order.
+        accel = (1234, -1234, 16384)
+        mag = (291, -240, 512)
+        channels = [
+            EChannelType.TIMESTAMP,
+            EChannelType.ACCEL_LN_X,
+            EChannelType.ACCEL_LN_Y,
+            EChannelType.ACCEL_LN_Z,
+            EChannelType.VBATT,
+            EChannelType.GYRO_X,
+            EChannelType.GYRO_Y,
+            EChannelType.GYRO_Z,
+            EChannelType.ACCEL_WR_X,
+            EChannelType.ACCEL_WR_Y,
+            EChannelType.ACCEL_WR_Z,
+            EChannelType.MAG_REG_X,
+            EChannelType.MAG_REG_Y,
+            EChannelType.MAG_REG_Z,
+            EChannelType.ACCEL_HG_X,
+            EChannelType.ACCEL_HG_Y,
+            EChannelType.ACCEL_HG_Z,
+            EChannelType.MAG_WR_X,
+            EChannelType.MAG_WR_Y,
+            EChannelType.MAG_WR_Z,
+        ]
+        body = (
+            b"\x10\x20\x30"
+            + struct.pack("<3h", 2048, 2047, 2049)
+            + struct.pack("<h", 2700)
+            + struct.pack(">3h", 100, -100, 0)
+            + struct.pack("<3h", accel[0], -accel[1], accel[2])
+            + struct.pack("<3h", mag[0], mag[1], -mag[2])
+            + struct.pack(">3h", *accel)
+            + struct.pack("<3h", *mag)
+        )
+        assert len(body) == 3 + 38
+
+        # Two packets back to back: the second must start where the first one ends
+        stream = b"\x00" + body + b"\x00" + body
+        ser = BluetoothSerial(_ByteStream(stream))
+        pkt = DataPacket(
+            revision, list(zip(channels, revision.get_channel_dtypes(channels)))
+        )
+        for _ in range(2):
+            pkt.receive(ser)
+
+            assert pkt[EChannelType.TIMESTAMP] == 0x302010
+            assert pkt[EChannelType.ACCEL_HG_X] == accel[0]
+            assert pkt[EChannelType.ACCEL_HG_Y] == accel[1]
+            assert pkt[EChannelType.ACCEL_HG_Z] == accel[2]
+            assert pkt[EChannelType.MAG_WR_X] == mag[0]
+            assert pkt[EChannelType.MAG_WR_Y] == mag[1]
+            assert pkt[EChannelType.MAG_WR_Z] == mag[2]
+
+            assert pkt[EChannelType.ACCEL_WR_X] == pkt[EChannelType.ACCEL_HG_X]
+            assert pkt[EChannelType.ACCEL_WR_Y] == -pkt[EChannelType.ACCEL_HG_Y]
+            assert pkt[EChannelType.ACCEL_WR_Z] == pkt[EChannelType.ACCEL_HG_Z]
+            assert pkt[EChannelType.MAG_REG_X] == pkt[EChannelType.MAG_WR_X]
+            assert pkt[EChannelType.MAG_REG_Z] == -pkt[EChannelType.MAG_WR_Z]
+            assert pkt[EChannelType.GYRO_Y] == -100
